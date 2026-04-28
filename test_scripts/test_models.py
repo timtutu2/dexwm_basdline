@@ -237,7 +237,7 @@ def main(args):
         num_workers=num_workers,
         persistent_workers=False,
         shuffle=True if args['use_model_pred_kps'] else False,  # use_model_pred_kps is used only for plotting images, shuffling to get varied images
-        drop_last=True if dataset_name=='egodex' else False)
+        drop_last=False)
 
 
     dexwm = DexWM(backbone_name=backbone_name,
@@ -279,7 +279,7 @@ def main(args):
     if args['visualize'] or args['decoder_checkpoint']:
         decoder.load_decoder(decoder_checkpoint)
 
-    if not args['visualize']:
+    if not args['visualize'] and args.get('model', {}).get('do_compile', False):
         dexwm = torch.compile(dexwm)
 
     dexwm.eval()
@@ -321,7 +321,7 @@ def main(args):
             rel_t_n = rel_t_padded[:,n:n+T]
             curr_frames_n = curr_frames_padded[:,n:n+T+1]
             # print(n,n+T,actions_n.shape, rel_t_n.shape, curr_frames_n.shape)
-            with torch.amp.autocast('cuda', dtype=torch.bfloat16):
+            with torch.amp.autocast('cuda', dtype=torch.float16):
                 with torch.inference_mode():
                     goal_pred_n, goal_tgt_n, pred_kp_n, emb_loss, kp_loss = dexwm(curr_frames_n, actions_n, rel_t_n, prev_emb=prev_emb, action_diff=True)
                     if patch_size == 14:
@@ -356,7 +356,7 @@ def main(args):
 
         if not args['use_model_pred_kps']:
             pred_emb2 = torch.cat([pred_emb[:,0:1], pred_emb], axis=1)
-            with torch.amp.autocast('cuda', dtype=torch.bfloat16):
+            with torch.amp.autocast('cuda', dtype=torch.float16):
                 with torch.inference_mode():
                     pred_kp, kp_loss = kp_model.forward_kp(pred_emb2, cam_pose=None, gt_kps=None, valid_kp=None)
             _, H, W = pred_kp.shape
@@ -380,7 +380,7 @@ def main(args):
         if not args['visualize']:
             continue
 
-        with torch.amp.autocast('cuda', dtype=torch.bfloat16):
+        with torch.amp.autocast('cuda', dtype=torch.float16):
             with torch.inference_mode():
                 goal_pred_frames = decoder(pred_emb, hw_input=hw)
 

@@ -95,7 +95,7 @@ def main(args):
         pass
 
     # Indices of samples with clear goal observations and well-defined tasks
-    indices = [3, 9, 12, 15, 17, 19, 20, 25, 26, 28, 35, 36, 37, 39, 41, 44, 55, 56, 57, 59, 64,
+    indices = [0, 3, 9, 12, 15, 17, 19, 20, 25, 26, 28, 35, 36, 37, 39, 41, 44, 55, 56, 57, 59, 64,
                 68, 69, 70, 83, 86, 87, 88, 104, 109, 110, 111, 112, 115, 120, 129, 131, 134, 141,
                 145, 146, 149, 151, 152, 155, 157, 158, 160, 163, 168]
     test_demos = json.load(open('utils/split_indices_robocasa_pp.json', 'r'))['test']
@@ -149,7 +149,7 @@ def main(args):
         args.renderer = "mjviewer"
         env_kwargs = env_meta["env_kwargs"]
         env_kwargs["env_name"] = env_meta["env_name"]
-        env_kwargs["has_renderer"] = False
+        env_kwargs["has_renderer"] = args.render
         env_kwargs["renderer"] = args.renderer
         env_kwargs["has_offscreen_renderer"] = True
         env_kwargs["use_camera_obs"] = True
@@ -259,6 +259,7 @@ if __name__=='__main__':
     parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--data_dir', type=str, required=True)
     parser.add_argument('--debug', action='store_true')
+    parser.add_argument('--render', action='store_true', help='Show live simulator window')
     args = parser.parse_args()
     os.makedirs(args.job_dir, exist_ok=True)
     main(args)

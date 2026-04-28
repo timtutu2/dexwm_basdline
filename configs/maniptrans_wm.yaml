@@ -1,0 +1,41 @@
+dataset: egodex       # reuse EgoDexDataset — same MP4+HDF5 format
+model:
+  backbone_name: dinov2
+  hidden_dim: 1024
+  action_dim: 132
+  depth: 32
+  num_heads: 16
+  mlp_ratio: 2.0
+  do_compile: False   # keep False during early debug
+data:
+  root_folder: /home/yulun/projects/dexwm/data/maniptrans_wm
+  max_context_len: 120
+  num_context: 8
+  img_size: 224
+  aug: True
+  keys: all
+  var_time: True
+train:
+  global_seed: 0
+  batch_size: 1        # RTX 2080 (10.75 GB) — keep at 1
+  num_workers: 2
+  epochs: 40
+  optim:
+    lr: 1e-3
+    lr_decoder: 1e-4
+    weight_decay: 1e-5
+  scheduler:
+    final_div_factor: 1e3
+    max_lr: 1e-4
+    decoder_final_div_factor: 1e3
+    decoder_max_lr: 1e-4
+  do_eval: False
+  eval_freq: 100
+  kp_weight: 100
+  resume: /home/yulun/projects/dexwm/data/checkpoints/egodex_0.pth_24000.tar  # finetune from Runfa's ckpt
+  save_name: maniptrans_wm
+wandb:
+  do_wandb: False
+  project: dexwm
+  entity: dexwm
+  name: maniptrans_wm

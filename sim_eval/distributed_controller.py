@@ -99,7 +99,7 @@ class DexWMControllerDist:
         self.rank = rank
         self.model = self.model.to(device)
         self.model = DDP(self.model, device_ids=[device])
-        self.model = torch.compile(self.model)
+        # self.model = torch.compile(self.model)  # disabled: requires A100+ for bfloat16/Triton
         self.model.eval()
         self.idx = 0
         self.opt_steps = opt_steps
@@ -483,9 +483,11 @@ class DexWMControllerDist:
     def autoregressive_rollout(self, dataloader, rollout_stride=1, cam_actions=None, rel_t=None):
         all_emb_list = []
         all_kp_list = []
+        H_saved, W_saved = None, None
         for obs_image, deltas in dataloader:
             obs_image = obs_image.to(self.device)
             _,_,_,H,W = obs_image.shape
+            H_saved, W_saved = H, W
             deltas = deltas.to(self.device)
             deltas = deltas.unflatten(1, (-1, rollout_stride)).sum(2)
             T = self.pred_steps
@@ -493,7 +495,6 @@ class DexWMControllerDist:
             cam_actions = torch.zeros([deltas.shape[0], deltas.shape[1], 6]).to(self.device)
             rel_t = torch.zeros([deltas.shape[0], deltas.shape[1]]).to(self.device)
             deltas = torch.cat([deltas, cam_actions], -1)
-            preds = []
             curr_obs = obs_image.clone().to(self.device)
 
             T_context = self.num_context
@@ -522,7 +523,14 @@ class DexWMControllerDist:
                 else:
                     prev_emb = torch.cat([prev_emb, goal_pred_n[:,-1:]], axis=1)
                     pred_kp = torch.cat([pred_kp, pred_kp_n[:,-1:]], axis=1)
-            preds = prev_emb
+            all_emb_list.append(prev_emb.cpu())
+            all_kp_list.append(pred_kp.cpu())
+            torch.cuda.empty_cache()
+
+        preds = torch.cat(all_emb_list, dim=0).to(self.device)
+        pred_kp = torch.cat(all_kp_list, dim=0).to(self.device)
+        b = preds.shape[0]
+        H, W = H_saved, W_saved
 
         pred_kp = pred_kp[:,:,6:self.kp_end_idx]
         pred_kp = pred_kp.reshape(-1,self.kp_end_idx-6,H,W)
@@ -540,7 +548,7 @@ class DexWMControllerDist:
         self.seen_frames.append(curr_frame)
         len_traj_pred = self.pred_steps-(len(self.seen_frames)-1)
         with torch.inference_mode():
-            with torch.amp.autocast('cuda', dtype=torch.bfloat16):
+            with torch.amp.autocast('cuda', dtype=torch.float16):
                 delta, joint_angles, pred_kps = self.optimize_actions(curr_frame, goal_frame, rel_t=None, len_traj_pred=len_traj_pred, sim=sim, obs=obs, curr_kp=curr_kp)
         delta = delta[:self.action_step].view(self.action_step,-1,3)
         delta = delta.cpu().numpy()

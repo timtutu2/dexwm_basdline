@@ -6,7 +6,6 @@
 # --------------------------------------------------------
 
 
-
 # Global Mujoco Simulation Parameters
 SIMULATION_TIMESTEP = 0.002  # Internal simulation timestep (in seconds)
 

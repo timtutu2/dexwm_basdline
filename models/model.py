@@ -174,7 +174,8 @@ class MHA(nn.Module):
         query = query.unflatten(-1, [self.nheads, self.E_head]).transpose(1, 2)
         key = key.unflatten(-1, [self.nheads, self.E_head]).transpose(1, 2)
         value = value.unflatten(-1, [self.nheads, self.E_head]).transpose(1, 2)
-        attn_output = flex_attention(query, key, value, block_mask=self.block_mask.to(query.device))
+        # attn_output = flex_attention(query, key, value, block_mask=self.block_mask.to(query.device), is_causal=True)
+        attn_output = F.scaled_dot_product_attention(query, key, value) #for backward compatibility 2080Ti GPU
 
         attn_output = attn_output.transpose(1, 2).flatten(-2)
         attn_output = self.out_proj(attn_output)

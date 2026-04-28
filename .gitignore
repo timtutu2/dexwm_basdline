@@ -25,6 +25,8 @@ metric_comp_examples/
 models_to_transfer/
 utils/misc_utils.py
 srun_script.sh
+output/
+data/
 
 
 

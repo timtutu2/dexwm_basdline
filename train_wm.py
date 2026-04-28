@@ -205,7 +205,7 @@ def main(args_temp, args):
     else:
         # Use FSDP 1 since 2 is buggy
         mixed_precision_policy = MixedPrecision(
-            param_dtype=torch.bfloat16,
+            param_dtype=torch.float16,
             reduce_dtype=torch.float32,
             buffer_dtype=torch.float32
         )
@@ -331,7 +331,7 @@ def main(args_temp, args):
             heatmaps = heatmaps.to(device, non_blocking=True)
             valid_kp = valid_kp.to(device, non_blocking=True)
 
-            with torch.amp.autocast('cuda', dtype=torch.bfloat16):
+            with torch.amp.autocast('cuda', dtype=torch.float16):
                 goal_pred, goal_tgt, pred_kp, emb_loss, kp_loss = model(curr_frames, actions, rel_t, gt_kps=heatmaps, valid_kp=valid_kp)
                 loss = emb_loss + kp_weight*kp_loss
 
@@ -415,7 +415,7 @@ def main(args_temp, args):
             valid_kp = valid_kp.to(device, non_blocking=True)
 
             with torch.inference_mode():
-                with torch.amp.autocast('cuda', dtype=torch.bfloat16):
+                with torch.amp.autocast('cuda', dtype=torch.float16):
                     goal_pred, goal_tgt, pred_kp, emb_loss, kp_loss = model(curr_frames, actions, rel_t, gt_kps=heatmaps, valid_kp=valid_kp)
             tot_emb_loss += emb_loss.item()
             tot_kp_loss += kp_loss.item()
