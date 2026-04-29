@@ -346,8 +346,8 @@ class DexWM(nn.Module):
         else:
             blockwise_spatial_partial = partial(blockwise_spatial_mask, num_frames=inference_context_size + 1, num_tokens=num_patches)
             blockwise_temporal_partial = partial(blockwise_temporal_mask, num_frames=inference_context_size + 1, num_tokens=num_patches)
-        spatial_mask = create_block_mask(blockwise_spatial_partial, B=1, H=1, Q_LEN=window_size, KV_LEN=window_size)
-        temporal_mask = create_block_mask(blockwise_temporal_partial, B=1, H=1, Q_LEN=window_size, KV_LEN=window_size)
+        spatial_mask = create_block_mask(blockwise_spatial_partial, B=1, H=1, Q_LEN=window_size, KV_LEN=window_size, device='cpu')
+        temporal_mask = create_block_mask(blockwise_temporal_partial, B=1, H=1, Q_LEN=window_size, KV_LEN=window_size, device='cpu')
         self.temporal_mask = temporal_mask
 
         self.blocks = nn.ModuleList([CDiTBlock(hidden_dim, num_heads, self.action_dim, mlp_ratio=mlp_ratio, spatial_mask=spatial_mask, temporal_mask=temporal_mask) for _ in range(depth)])
