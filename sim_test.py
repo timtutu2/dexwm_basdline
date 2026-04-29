@@ -95,7 +95,7 @@ def main(args):
         pass
 
     # Indices of samples with clear goal observations and well-defined tasks
-    indices = [0, 3, 9, 12, 15, 17, 19, 20, 25, 26, 28, 35, 36, 37, 39, 41, 44, 55, 56, 57, 59, 64,
+    indices = [3, 9, 12, 15, 17, 19, 20, 25, 26, 28, 35, 36, 37, 39, 41, 44, 55, 56, 57, 59, 64,
                 68, 69, 70, 83, 86, 87, 88, 104, 109, 110, 111, 112, 115, 120, 129, 131, 134, 141,
                 145, 146, 149, 151, 152, 155, 157, 158, 160, 163, 168]
     test_demos = json.load(open('utils/split_indices_robocasa_pp.json', 'r'))['test']

@@ -37,6 +37,7 @@ import matplotlib.pyplot as plt
 from functools import partial
 import wandb
 import torch._dynamo
+torch._dynamo.config.suppress_errors = True  # graceful fallback on unsupported Blackwell kernels
 from train_wm import get_patch_size_from_backbone
 
 def get_latest_checkpoint(args):
@@ -245,7 +246,7 @@ def main(args_temp, args):
 
     last_epoch = 0
     start_step = 0
-    scaler = torch.amp.GradScaler('cuda')
+    scaler = torch.amp.GradScaler('cuda', enabled=False)  # BF16 has FP32-range exponent; scaling is unnecessary
 
     latest_ckpt = get_latest_checkpoint(args)
     # Always prefer the latest checkpoint if it exists (handles preemption properly)
