@@ -514,6 +514,23 @@ def main(args_temp, args):
         # Reset start_step for next epoch
         start_step = 0
 
+        # Save checkpoint at end of every epoch
+        if rank == 0:
+            checkpoint_dir = f"{args['job_dir']}/checkpoints"
+            os.makedirs(checkpoint_dir, exist_ok=True)
+            checkpoint_path = f"{checkpoint_dir}/{save_name}_epoch{e}.pth.tar"
+            optimizer_state_dict = optimizer.state_dict()
+            model_state_dict = dexwm.module.state_dict() if hasattr(dexwm, 'module') else dexwm.state_dict()
+            torch.save({
+                "model": model_state_dict,
+                "opt": optimizer_state_dict,
+                "scheduler": lr_scheduler.state_dict(),
+                "args": args,
+                "epoch": e,
+                "scaler": scaler.state_dict()
+            }, checkpoint_path)
+            print(f"Saved checkpoint: {checkpoint_path}")
+
     cleanup()
 
 

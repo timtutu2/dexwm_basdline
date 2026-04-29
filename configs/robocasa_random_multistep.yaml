@@ -29,7 +29,7 @@ train:
     decoder_final_div_factor: 1e3
     decoder_max_lr: 1e-4
   do_eval: True
-  eval_freq: 100
+  eval_freq: 46
   kp_weight: 100
   resume: /mnt/data/tim_data/dexwm/data/checkpoints/egodex_0.pth_24000.tar
   save_name: robocasa_random_multistep
