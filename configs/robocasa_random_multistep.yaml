@@ -6,7 +6,7 @@ model:
   depth: 32
   num_heads: 16
   mlp_ratio: 2.0
-  do_compile: True
+  do_compile: False
 data:
   root_folder: /mnt/data/tim_data/dexwm/data
   max_context_len: 80
@@ -16,8 +16,8 @@ data:
   full_seq: True
 train:
   global_seed: 0
-  batch_size: 8
-  num_workers: 4  # reduced from 12 for single-GPU desktop
+  batch_size: 4
+  num_workers: 4
   epochs: 20
   optim:
     lr: 1e-3
