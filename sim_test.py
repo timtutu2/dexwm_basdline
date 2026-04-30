@@ -100,9 +100,10 @@ def main(args):
                 145, 146, 149, 151, 152, 155, 157, 158, 160, 163, 168]
     test_demos = json.load(open('utils/split_indices_robocasa_pp.json', 'r'))['test']
 
-    # Filter demos to only those in indices list and whose HDF5 file exists on disk
+    # Filter demos to only those whose HDF5 file exists on disk
+    # (falls back gracefully when only a subset of files is downloaded)
     filtered_demos = [(idx, demo_name) for idx, demo_name in enumerate(test_demos)
-                      if idx in indices and os.path.exists(os.path.join(args.data_dir, demo_name[0]))]
+                      if os.path.exists(os.path.join(args.data_dir, demo_name[0]))]
     if args.debug:
         # For debugging just run one episode
         filtered_demos = filtered_demos[:1]
