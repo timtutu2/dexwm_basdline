@@ -317,8 +317,8 @@ class DexWMControllerDist:
         start_mu = self.get_current_joints(sim)
         mu, sigma, mu_ref = self.init_mu_sigma(obs_image, len_traj_pred, curr_mu=start_mu)  # initializing all joints as optimization variables
 
-        goal_emb_0 = self.model.module.encode_image(goal_image[0].unsqueeze(0).unsqueeze(1)).squeeze(1)
-        goal_kp_0, _ = self.model.module.forward_kp(goal_emb_0.unsqueeze(1).repeat(1,2,1,1), None, None, None)
+        goal_emb_0 = self._inner_model.encode_image(goal_image[0].unsqueeze(0).unsqueeze(1)).squeeze(1)
+        goal_kp_0, _ = self._inner_model.forward_kp(goal_emb_0.unsqueeze(1).repeat(1,2,1,1), None, None, None)
         _, _, H, W = goal_image.shape
         goal_kp_0 = goal_kp_0.view(1,1,-1,H,W)        # (1,1,12,H,W)     6 keypoints per hand
         goal_kp_0 = goal_kp_0[:,0,6:self.kp_end_idx]                # (1,1,6,H,W) only cconsidering right hand
@@ -370,9 +370,9 @@ class DexWMControllerDist:
                 # self.seen_frames is populated as the robot takes steps in the simulation
                 seen_images = torch.cat(self.seen_frames,dim=1)
                 cur_obs_image = seen_images[sample_id].unsqueeze(0).repeat(self.num_samples, 1, 1, 1, 1)
-                goal_emb_0 = self.model.module.encode_image(goal_image[sample_id].unsqueeze(0).unsqueeze(1)).squeeze(1)
+                goal_emb_0 = self._inner_model.encode_image(goal_image[sample_id].unsqueeze(0).unsqueeze(1)).squeeze(1)
                 goal_emb = goal_emb_0.repeat(self.num_samples, 1, 1)
-                goal_kp_0, _ = self.model.module.forward_kp(goal_emb_0.unsqueeze(1).repeat(1,2,1,1), None, None, None)
+                goal_kp_0, _ = self._inner_model.forward_kp(goal_emb_0.unsqueeze(1).repeat(1,2,1,1), None, None, None)
                 _, _, H, W = goal_image.shape
                 goal_kp_0 = goal_kp_0.view(1,1,-1,H,W)        # (1,1,12,H,W)
                 goal_kp_0 = goal_kp_0[:,0,6:self.kp_end_idx]                # (1,1,6,H,W)
@@ -461,7 +461,7 @@ class DexWMControllerDist:
         pred_states, _ = self.autoregressive_rollout(dataloader)
 
         pred_states2 = torch.cat([pred_states[0:1,0:1], pred_states[0:1]], dim=1)
-        pred_kps, _ = self.model.module.forward_kp(pred_states2[0:1], None, None, None)
+        pred_kps, _ = self._inner_model.forward_kp(pred_states2[0:1], None, None, None)
         _, _, H, W = goal_image.shape
         pred_kps = pred_kps.view(1,-1,12,H,W)
         pred_kps = pred_kps[0,:,6:self.kp_end_idx]
@@ -472,7 +472,7 @@ class DexWMControllerDist:
             pred_imgs = self.decoder(pred_states[0:1], hw_input = hw)
             pred_states = torch.cat([pred_states[0:1,0:1], pred_states[0:1]], dim=1)
             self.plot_all_kp(pred_imgs[0], kp_sample[0], f'{self.idx}')
-            pred_kps, _ = self.model.module.forward_kp(pred_states[0:1], None, None, None)
+            pred_kps, _ = self._inner_model.forward_kp(pred_states[0:1], None, None, None)
             _, _, H, W = goal_image.shape
             pred_kps = pred_kps.view(1,-1,12,H,W)
             pred_kps = pred_kps[0,:,6:self.kp_end_idx]
