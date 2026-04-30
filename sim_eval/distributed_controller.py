@@ -98,7 +98,9 @@ class DexWMControllerDist:
         self.device = device
         self.rank = rank
         self.model = self.model.to(device)
-        self.model = DDP(self.model, device_ids=[device])
+        if dist.get_world_size() > 1:
+            self.model = DDP(self.model, device_ids=[device])
+        self._inner_model = self.model.module if hasattr(self.model, 'module') else self.model
         # self.model = torch.compile(self.model)  # disabled: requires A100+ for bfloat16/Triton
         self.model.eval()
         self.idx = 0
