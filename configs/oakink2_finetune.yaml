@@ -1,0 +1,48 @@
+dataset: oakink2_maniptrans
+
+model:
+  backbone_name: dinov2
+  hidden_dim: 1024
+  action_dim: 132        # 44 keypoints × 3 coords = 132 (matches EgoDex format)
+  depth: 32
+  num_heads: 16
+  mlp_ratio: 2.0
+  do_compile: False
+
+data:
+  # Retargeted pkl files (mano2inspire for the 083f7@0 OakInk2 sequence)
+  rh_pkl_path: /mnt/data/tim_data/dexwm/data/oakink2_processed/retargeted_inspire/rh/scene_01__A001++seq__083f7a577484ba7929a9__2023-04-27-19-25-24@0.pkl
+  lh_pkl_path: /mnt/data/tim_data/dexwm/data/oakink2_processed/retargeted_inspire/lh/scene_01__A001++seq__083f7a577484ba7929a9__2023-04-27-19-25-24@0.pkl
+  # Rendered RGB images from dexhandmanip_bih_gt_v2.py chest camera (294×224 @ hfov=60°)
+  rgb_dir: /mnt/data/tim_data/dexwm/data/oakink2_processed/rgb
+  max_context_len: 60    # shorter than EgoDex since we have only ~1200 frames
+  num_context: 8
+  img_size: 224
+  aug: True
+  var_time: True
+
+train:
+  global_seed: 0
+  batch_size: 1           # single GPU; increase if memory allows
+  num_workers: 2
+  epochs: 20
+  optim:
+    lr: 1e-4              # lower LR for fine-tuning
+    lr_decoder: 1e-5
+    weight_decay: 1e-5
+  scheduler:
+    final_div_factor: 1e3
+    max_lr: 1e-4
+    decoder_final_div_factor: 1e3
+    decoder_max_lr: 1e-5
+  do_eval: False          # single sequence; meaningful val is not available
+  eval_freq: 50
+  kp_weight: 0            # no keypoint supervision; set to 0
+  resume: /mnt/data/tim_data/dexwm/data/checkpoints/egodex_0.pth_24000.tar
+  save_name: oakink2_maniptrans_ft
+
+wandb:
+  do_wandb: False
+  project: dexwm
+  entity: dexwm
+  name: oakink2_maniptrans_ft

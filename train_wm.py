@@ -31,6 +31,7 @@ from datasets.egodex import EgoDexDataset
 from datasets.robocasa_random_movement import RobocasaRandomDataset
 from datasets.droid import DroidDataset
 from datasets.egodex_and_droid import EgodexDroidDataset
+from datasets.oakink2_maniptrans import OakInk2ManipTransDataset
 from models.model import DexWM, CDiTBlock
 import matplotlib.pyplot as plt
 from functools import partial
@@ -151,6 +152,19 @@ def main(args_temp, args):
         val_subset = EgodexDroidDataset(egodex_root_folder=egodex_root_folder, droid_root_folder=droid_root_folder,
                                     max_context_len=max_context_len, num_context=num_context, patch_size=patch_size,
                                     backbone_name=backbone_name, img_size=img_size, aug=False, train=False, keys=keys, var_time=var_time)
+
+    elif dataset_name == 'oakink2_maniptrans':
+        rh_pkl_path = args['data']['rh_pkl_path']
+        lh_pkl_path = args['data']['lh_pkl_path']
+        rgb_dir     = args['data']['rgb_dir']
+        train_subset = OakInk2ManipTransDataset(
+            rh_pkl_path=rh_pkl_path, lh_pkl_path=lh_pkl_path, rgb_dir=rgb_dir,
+            max_context_len=max_context_len, num_context=num_context, patch_size=patch_size,
+            backbone_name=backbone_name, img_size=img_size, aug=aug, train=True, var_time=var_time)
+        val_subset = OakInk2ManipTransDataset(
+            rh_pkl_path=rh_pkl_path, lh_pkl_path=lh_pkl_path, rgb_dir=rgb_dir,
+            max_context_len=max_context_len, num_context=num_context, patch_size=patch_size,
+            backbone_name=backbone_name, img_size=img_size, aug=False, train=False, var_time=var_time)
 
 
 
@@ -278,18 +292,25 @@ def main(args_temp, args):
             checkpoint = torch.load(checkpoint_path, map_location=torch.device('cpu'))
         pretrained_dict = checkpoint["model"]
 
+        # Load optimizer/scheduler state only when resuming within the same dataset domain.
+        # Cross-domain fine-tuning (e.g. egodex → oakink2_maniptrans) loads model weights
+        # only, letting the optimizer start fresh.
+        _same_domain = (
+            ('robocasa' not in dataset_name or 'robocasa' in resume) and
+            ('oakink2' not in dataset_name or 'oakink2' in resume)
+        )
         if use_fsdp:
             dexwm.load_state_dict(pretrained_dict)
-            if ('robocasa' not in dataset_name) or ('robocasa' in resume):   # load optimizer for robocasa only when resuming from a robocasa savepoint
+            if _same_domain:
                 sharded_optim_state_dict = FSDP.optim_state_dict_to_load(
                     dexwm, optimizer, checkpoint["opt"]
                 )
                 optimizer.load_state_dict(sharded_optim_state_dict)
         else:
             dexwm.module.load_state_dict(pretrained_dict)
-            if ('robocasa' not in dataset_name) or ('robocasa' in resume):
+            if _same_domain:
                 optimizer.load_state_dict(checkpoint["opt"])
-        if ('robocasa' not in dataset_name) or ('robocasa' in resume):
+        if _same_domain:
             lr_scheduler.load_state_dict(checkpoint["scheduler"])
             last_epoch = checkpoint["epoch"]
             start_step = checkpoint["train_steps"] + 1
