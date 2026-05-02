@@ -104,6 +104,7 @@ def main(args_temp, args):
 
     if rank == 0:
         if args['wandb']['do_wandb']:   # set to false during debugging to avoid recording results
+            wandb.login(key=args['wandb'].get('api_key'))
             wandb.init(project=args['wandb']['project'],
                     entity=args['wandb']['entity'],
                     name=args['wandb']['name'],

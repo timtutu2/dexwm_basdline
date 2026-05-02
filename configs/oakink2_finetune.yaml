@@ -42,7 +42,8 @@ train:
   save_name: oakink2_maniptrans_ft
 
 wandb:
-  do_wandb: False
+  do_wandb: True
   project: dexwm
-  entity: dexwm
+  entity: kttu_tim-uc-san-diego
   name: oakink2_maniptrans_ft
+  api_key: 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
