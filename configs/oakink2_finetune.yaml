@@ -25,7 +25,7 @@ train:
   global_seed: 0
   batch_size: 1           # single GPU; increase if memory allows
   num_workers: 2
-  epochs: 20
+  epochs: 50000
   optim:
     lr: 1e-4              # lower LR for fine-tuning
     lr_decoder: 1e-5
