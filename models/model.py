@@ -17,7 +17,12 @@ from functools import partial
 from einops import rearrange, repeat
 from transformers import AutoModel
 from timm.models.vision_transformer import PatchEmbed, Attention, Mlp
-from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+# from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+try:
+    from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+except ModuleNotFoundError:
+    create_block_mask = None
+    flex_attention = None
 from einops import rearrange
 from .decoder_vit import SimpleViTDecoder
 
@@ -346,8 +351,14 @@ class DexWM(nn.Module):
         else:
             blockwise_spatial_partial = partial(blockwise_spatial_mask, num_frames=inference_context_size + 1, num_tokens=num_patches)
             blockwise_temporal_partial = partial(blockwise_temporal_mask, num_frames=inference_context_size + 1, num_tokens=num_patches)
-        spatial_mask = create_block_mask(blockwise_spatial_partial, B=1, H=1, Q_LEN=window_size, KV_LEN=window_size, device='cpu')
-        temporal_mask = create_block_mask(blockwise_temporal_partial, B=1, H=1, Q_LEN=window_size, KV_LEN=window_size, device='cpu')
+        # spatial_mask = create_block_mask(blockwise_spatial_partial, B=1, H=1, Q_LEN=window_size, KV_LEN=window_size, device='cpu')
+        # temporal_mask = create_block_mask(blockwise_temporal_partial, B=1, H=1, Q_LEN=window_size, KV_LEN=window_size, device='cpu')
+        if create_block_mask is not None:
+            spatial_mask = create_block_mask(blockwise_spatial_partial, B=1, H=1, Q_LEN=window_size, KV_LEN=window_size, device='cpu')
+            temporal_mask = create_block_mask(blockwise_temporal_partial, B=1, H=1, Q_LEN=window_size, KV_LEN=window_size, device='cpu')
+        else:
+            spatial_mask = None
+            temporal_mask = None
         self.temporal_mask = temporal_mask
 
         self.blocks = nn.ModuleList([CDiTBlock(hidden_dim, num_heads, self.action_dim, mlp_ratio=mlp_ratio, spatial_mask=spatial_mask, temporal_mask=temporal_mask) for _ in range(depth)])
