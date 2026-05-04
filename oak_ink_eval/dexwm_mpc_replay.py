@@ -252,7 +252,7 @@ def score_candidates(model, context_imgs, curr_pose44, cand_poses,
 
 # ─────────────────────────────── IsaacGym setup ───────────────────────────────
 
-def init_gym():
+def init_gym(gpu_id: int):
     gym = gymapi.acquire_gym()
     sp = gymapi.SimParams()
     sp.up_axis = gymapi.UP_AXIS_Z
@@ -265,7 +265,7 @@ def init_gym():
     sp.physx.num_velocity_iterations = 1
     sp.physx.contact_offset = 0.002
     sp.physx.rest_offset = 0.0
-    sim = gym.create_sim(0, 0, gymapi.SIM_PHYSX, sp)
+    sim = gym.create_sim(gpu_id, gpu_id, gymapi.SIM_PHYSX, sp)
     assert sim is not None
     pp = gymapi.PlaneParams(); pp.normal = gymapi.Vec3(0, 0, 1)
     gym.add_ground(sim, pp)
@@ -316,8 +316,13 @@ def set_pos_drive(gym, env, actor, n_dof):
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--maniptrans_root", required=True,
-                   help="Path to the ManipTrans repo root (contains maniptrans_envs/assets/ and data/)")
+    p.add_argument("--maniptrans_root", default=None,
+                   help="Path to the ManipTrans repo root (contains maniptrans_envs/assets/ and data/). "
+                        "Can be omitted if --data_root and --asset_root are both provided.")
+    p.add_argument("--data_root",  default=None,
+                   help="Override for <maniptrans_root>/OakInk-v2/ (e.g. /mnt/data/.../maniptrans_lib)")
+    p.add_argument("--asset_root", default=None,
+                   help="Override for <maniptrans_root>/assets/ (contains inspire_hand/)")
     p.add_argument("--data_idx",         default="083f7@0",
                    help="OakInk-V2 sequence index, e.g. 083f7@0")
     p.add_argument("--dexwm_checkpoint", required=True)
@@ -328,16 +333,21 @@ def parse_args():
     p.add_argument("--headless",         action="store_true")
     p.add_argument("--search_window",    type=int, default=10)
     p.add_argument("--fps",              type=float, default=30.0)
-    return p.parse_args()
+    p.add_argument("--gpu_id",           type=int, default=0,
+                   help="CUDA/IsaacGym GPU id to use")
+    args = p.parse_args()
+    if args.maniptrans_root is None and (args.data_root is None or args.asset_root is None):
+        p.error("Provide --maniptrans_root, or both --data_root and --asset_root")
+    return args
 
 
 def main():
     args    = parse_args()
-    device  = torch.device("cuda:0")
+    device  = torch.device(f"cuda:{args.gpu_id}")
     stage   = int(args.data_idx.split("@")[1])
 
-    ASSET_ROOT = os.path.join(args.maniptrans_root, "maniptrans_envs", "assets")
-    DATA_ROOT  = os.path.join(args.maniptrans_root, "data")
+    ASSET_ROOT = args.asset_root or os.path.join(args.maniptrans_root, "maniptrans_envs", "assets")
+    DATA_ROOT  = args.data_root  or os.path.join(args.maniptrans_root, "data")
 
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -390,7 +400,7 @@ def main():
 
     # ── IsaacGym ──────────────────────────────────────────────────────────────
     print("Initialising IsaacGym …")
-    gym, sim = init_gym()
+    gym, sim = init_gym(args.gpu_id)
 
     rh_asset     = load_hand_asset(gym, sim, "rh", ASSET_ROOT)
     lh_asset     = load_hand_asset(gym, sim, "lh", ASSET_ROOT)
@@ -446,7 +456,7 @@ def main():
     obj_rh_idx = gym.get_actor_index(env, obj_rh_actor, gymapi.DOMAIN_SIM)
     obj_lh_idx = gym.get_actor_index(env, obj_lh_actor, gymapi.DOMAIN_SIM)
     all_idxs   = torch.tensor([rh_idx, lh_idx, obj_rh_idx, obj_lh_idx],
-                               dtype=torch.int32, device="cuda:0")
+                               dtype=torch.int32, device=device)
 
     viewer = None
     if not args.headless:
@@ -461,18 +471,18 @@ def main():
             (rh_idx, rh_data["opt_wrist_pos"][fi], rh_data["opt_wrist_rot"][fi]),
             (lh_idx, lh_data["opt_wrist_pos"][fi], lh_data["opt_wrist_rot"][fi]),
         ]:
-            root_state[idx, :3]  = torch.tensor(pos.astype(np.float32), device="cuda:0")
-            root_state[idx, 3:7] = torch.tensor(aa_to_isaac_quat(rot), device="cuda:0")
+            root_state[idx, :3]  = torch.tensor(pos.astype(np.float32), device=device)
+            root_state[idx, 3:7] = torch.tensor(aa_to_isaac_quat(rot), device=device)
             root_state[idx, 7:]  = 0.0
         for actor_idx, traj in [(obj_rh_idx, obj_rh_traj), (obj_lh_idx, obj_lh_traj)]:
             T = traj[fi]
-            root_state[actor_idx, :3]  = torch.tensor(T[:3, 3], device="cuda:0")
-            root_state[actor_idx, 3:7] = torch.tensor(rotmat_to_isaac_quat(T[:3, :3]), device="cuda:0")
+            root_state[actor_idx, :3]  = torch.tensor(T[:3, 3], device=device)
+            root_state[actor_idx, 3:7] = torch.tensor(rotmat_to_isaac_quat(T[:3, :3]), device=device)
             root_state[actor_idx, 7:]  = 0.0
         rd = rh_data["opt_dof_pos"][fi].astype(np.float32)
         ld = lh_data["opt_dof_pos"][fi].astype(np.float32)
-        dof_state[:n_rh, 0] = torch.tensor(rd, device="cuda:0"); dof_state[:n_rh, 1] = 0.0
-        dof_state[n_rh:n_rh+n_lh, 0] = torch.tensor(ld, device="cuda:0"); dof_state[n_rh:n_rh+n_lh, 1] = 0.0
+        dof_state[:n_rh, 0] = torch.tensor(rd, device=device); dof_state[:n_rh, 1] = 0.0
+        dof_state[n_rh:n_rh+n_lh, 0] = torch.tensor(ld, device=device); dof_state[n_rh:n_rh+n_lh, 1] = 0.0
         gym.set_actor_root_state_tensor_indexed(
             sim, gymtorch.unwrap_tensor(root_state),
             gymtorch.unwrap_tensor(all_idxs), len(all_idxs)
