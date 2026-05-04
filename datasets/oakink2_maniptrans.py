@@ -192,17 +192,26 @@ class OakInk2ManipTransDataset(Dataset):
         j_cam  = (_CAM_EXTR @ j_hom.T).T                        # (N, 4)
         return j_cam[:, :3]                                      # (N, 3)
 
+    @staticmethod
+    def _resize_joints(joints_cam: np.ndarray, target: int = _N_KP_PER_HAND) -> np.ndarray:
+        """Truncate or pad (N, 3) joints to exactly (target, 3)."""
+        n = len(joints_cam)
+        if n >= target:
+            return joints_cam[:target]
+        pad = np.tile(joints_cam[-1:], (target - n, 1))
+        return np.concatenate([joints_cam, pad], axis=0)
+
     def _get_pose(self, frame_idx: int) -> np.ndarray:
         """Return (44, 3) pose array for one frame in camera-frame coords."""
-        rh_j = self.rh_joints[frame_idx]                        # (18, 3)
-        lh_j = self.lh_joints[frame_idx]                        # (18, 3)
+        rh_j = self.rh_joints[frame_idx]
+        lh_j = self.lh_joints[frame_idx]
 
-        rh_cam = self._joints_to_cam(rh_j)                      # (18, 3)
-        lh_cam = self._joints_to_cam(lh_j)                      # (18, 3)
+        rh_cam = self._joints_to_cam(rh_j)
+        lh_cam = self._joints_to_cam(lh_j)
 
-        # Pad 18 → 21 by repeating the last 3 body positions
-        rh_padded = np.concatenate([rh_cam, rh_cam[-3:]], axis=0)   # (21, 3)
-        lh_padded = np.concatenate([lh_cam, lh_cam[-3:]], axis=0)   # (21, 3)
+        # Truncate or pad each hand to exactly _N_KP_PER_HAND=21 joints
+        rh_padded = self._resize_joints(rh_cam)   # (21, 3)
+        lh_padded = self._resize_joints(lh_cam)   # (21, 3)
 
         # Constant camera entries (delta will be 0 since camera is static)
         all_poses = np.concatenate([

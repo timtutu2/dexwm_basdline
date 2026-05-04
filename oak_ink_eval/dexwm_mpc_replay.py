@@ -13,7 +13,8 @@ Install IsaacGym in the dexwm env first:
 Usage (interactive viewer on david):
     ISAACGYM_PATH=/path/to/isaacgym/python \\
     PYTHONPATH=. python oak_ink_eval/dexwm_mpc_replay.py \\
-        --maniptrans_root /path/to/ManipTrans \\
+        --data_root      /path/to/maniptrans_lib \\
+        --asset_root     /path/to/assets \\
         --data_idx        083f7@0 \\
         --dexwm_checkpoint /mnt/data/tim_data/dexwm/runs/oakink2_ft_wandb/checkpoints/oakink2_maniptrans_ft_249.pth.tar \\
         --dexwm_config    /mnt/data/tim_data/dexwm/configs/oakink2_finetune.yaml \\
@@ -48,7 +49,18 @@ from scipy.spatial.transform import Rotation as ScipyR
 DEXWM_ROOT = str(Path(__file__).resolve().parent.parent)   # oak_ink_eval/../
 sys.path.insert(0, DEXWM_ROOT)
 from models.model import DexWM                    # noqa: E402
-from train_wm import get_patch_size_from_backbone # noqa: E402
+
+
+def get_patch_size_from_backbone(backbone_name):
+    if 'dinov2' in backbone_name or 'siglip' in backbone_name or 'webssl' in backbone_name:
+        patch_size = 14
+        num_patches = 448
+    elif 'dinov3' in backbone_name or 'vjepa' in backbone_name:
+        patch_size = 16
+        num_patches = 336
+    else:
+        raise ValueError(f'Backbone {backbone_name} not supported')
+    return patch_size, num_patches
 
 
 # ─────────────────────────────── quaternion math (no ManipTrans needed) ───────
@@ -316,13 +328,10 @@ def set_pos_drive(gym, env, actor, n_dof):
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--maniptrans_root", default=None,
-                   help="Path to the ManipTrans repo root (contains maniptrans_envs/assets/ and data/). "
-                        "Can be omitted if --data_root and --asset_root are both provided.")
-    p.add_argument("--data_root",  default=None,
-                   help="Override for <maniptrans_root>/OakInk-v2/ (e.g. /mnt/data/.../maniptrans_lib)")
-    p.add_argument("--asset_root", default=None,
-                   help="Override for <maniptrans_root>/assets/ (contains inspire_hand/)")
+    p.add_argument("--data_root",  default="/home/yulun/projects/ManipTrans/data",
+                   help="Root containing OakInk-v2/ and retargeting/")
+    p.add_argument("--asset_root", default="/mnt/drive/yulun/projects/ManipTrans/maniptrans_envs/assets",
+                   help="Root containing inspire_hand/")
     p.add_argument("--data_idx",         default="083f7@0",
                    help="OakInk-V2 sequence index, e.g. 083f7@0")
     p.add_argument("--dexwm_checkpoint", required=True)
@@ -335,10 +344,7 @@ def parse_args():
     p.add_argument("--fps",              type=float, default=30.0)
     p.add_argument("--gpu_id",           type=int, default=0,
                    help="CUDA/IsaacGym GPU id to use")
-    args = p.parse_args()
-    if args.maniptrans_root is None and (args.data_root is None or args.asset_root is None):
-        p.error("Provide --maniptrans_root, or both --data_root and --asset_root")
-    return args
+    return p.parse_args()
 
 
 def main():
@@ -346,8 +352,8 @@ def main():
     device  = torch.device(f"cuda:{args.gpu_id}")
     stage   = int(args.data_idx.split("@")[1])
 
-    ASSET_ROOT = args.asset_root or os.path.join(args.maniptrans_root, "maniptrans_envs", "assets")
-    DATA_ROOT  = args.data_root  or os.path.join(args.maniptrans_root, "data")
+    ASSET_ROOT = args.asset_root
+    DATA_ROOT  = args.data_root
 
     os.makedirs(args.output_dir, exist_ok=True)
 
