@@ -10,11 +10,8 @@ model:
   do_compile: False
 
 data:
-  # Retargeted pkl files (mano2artimano for the 083f7@0 OakInk2 sequence)
-  rh_pkl_path: /mnt/data/tim_data/dexwm/data/oakink2_processed/retargeted_artimano/mano2artimano_rh/scene_01__A001%2B%2Bseq__083f7a577484ba7929a9__2023-04-27-19-25-24@0.pkl
-  lh_pkl_path: /mnt/data/tim_data/dexwm/data/oakink2_processed/retargeted_artimano/mano2artimano_lh/scene_01__A001%2B%2Bseq__083f7a577484ba7929a9__2023-04-27-19-25-24@0.pkl
-  # RGB images rendered with dexhand=artimano (run replay_gt_rgbd.py --dexhand artimano first)
-  # Fall back to inspire renders if artimano renders are not yet available
+  rh_pkl_path: /mnt/data/tim_data/dexwm/data/oakink2_processed/retargeted_inspire/rh/scene_01__A001++seq__083f7a577484ba7929a9__2023-04-27-19-25-24@0.pkl
+  lh_pkl_path: /mnt/data/tim_data/dexwm/data/oakink2_processed/retargeted_inspire/lh/scene_01__A001++seq__083f7a577484ba7929a9__2023-04-27-19-25-24@0.pkl
   rgb_dir: /mnt/data/tim_data/dexwm/data/oakink2_processed/rgb
   max_context_len: 60
   num_context: 8
@@ -26,7 +23,7 @@ train:
   global_seed: 0
   batch_size: 1
   num_workers: 2
-  epochs: 5000
+  epochs: 50000
   optim:
     lr: 1e-4
     lr_decoder: 1e-5
@@ -38,12 +35,13 @@ train:
     decoder_max_lr: 1e-5
   do_eval: False
   eval_freq: 50
-  kp_weight: 0
+  kp_weight: 0            # no keypoint supervision
   resume: /mnt/data/tim_data/dexwm/data/checkpoints/egodex_0.pth_24000.tar
-  save_name: oakink2_artimano_ft
+  save_name: oakink2_maniptrans_multistep_ft
 
 wandb:
-  do_wandb: False
+  do_wandb: True
   project: dexwm
-  entity: dexwm
-  name: oakink2_artimano_ft
+  entity: kttu_tim-uc-san-diego
+  name: oakink2_maniptrans_multistep_ft
+  api_key: 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

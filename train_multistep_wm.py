@@ -32,6 +32,7 @@ from datasets.egodex import EgoDexDataset
 from datasets.robocasa_random_movement import RobocasaRandomDataset
 from datasets.droid import DroidDataset
 from datasets.egodex_and_droid import EgodexDroidDataset
+from datasets.oakink2_maniptrans import OakInk2ManipTransDataset
 from models.model import DexWM, CDiTBlock
 import matplotlib.pyplot as plt
 from functools import partial
@@ -96,6 +97,8 @@ def main(args_temp, args):
 
     if rank == 0:
         if args['wandb']['do_wandb']:   # set to false during debugging to avoid recording results
+            if args['wandb'].get('api_key'):
+                os.environ['WANDB_API_KEY'] = args['wandb']['api_key']
             wandb.init(project=args['wandb']['project'],
                     entity=args['wandb']['entity'],
                     name=args['wandb']['name'],
@@ -145,6 +148,19 @@ def main(args_temp, args):
                                     max_context_len=max_context_len, num_context=num_context, patch_size=patch_size,
                                     backbone_name=backbone_name, img_size=img_size, aug=False, train=False, keys=keys, var_time=var_time)
 
+    elif dataset_name == 'oakink2_maniptrans':
+        rh_pkl_path = args['data']['rh_pkl_path']
+        lh_pkl_path = args['data']['lh_pkl_path']
+        rgb_dir     = args['data']['rgb_dir']
+        train_subset = OakInk2ManipTransDataset(
+            rh_pkl_path=rh_pkl_path, lh_pkl_path=lh_pkl_path, rgb_dir=rgb_dir,
+            max_context_len=max_context_len, num_context=num_context, patch_size=patch_size,
+            backbone_name=backbone_name, img_size=img_size, aug=aug, train=True, var_time=var_time)
+        val_subset = OakInk2ManipTransDataset(
+            rh_pkl_path=rh_pkl_path, lh_pkl_path=lh_pkl_path, rgb_dir=rgb_dir,
+            max_context_len=max_context_len, num_context=num_context, patch_size=patch_size,
+            backbone_name=backbone_name, img_size=img_size, aug=False, train=False, var_time=var_time)
+
 
 
     train_sampler = DistributedSampler(train_subset,
@@ -188,7 +204,8 @@ def main(args_temp, args):
                 num_context = num_context,
                 emb_loss_fn=nn.MSELoss(reduction='mean'),
                 use_gradient_checkpointing=True,
-                use_fsdp=use_fsdp)
+                use_fsdp=use_fsdp,
+                num_keypoints=num_keypoints)
 
     if not use_fsdp:
         dexwm.to(device)
@@ -269,32 +286,30 @@ def main(args_temp, args):
             checkpoint = torch.load(checkpoint_path, map_location=torch.device('cpu'))
         pretrained_dict = checkpoint["model"]
 
+        _same_domain = (
+            ('robocasa' not in dataset_name or 'robocasa' in resume) and
+            ('oakink2' not in dataset_name or 'oakink2' in resume)
+        )
         if use_fsdp:
             dexwm.load_state_dict(pretrained_dict)
-            if ('robo' not in dataset_name) or ('robo' in resume):   # load optimizer for robocasa / real robot only when resuming from a robocasa savepoint
+            if _same_domain:
                 sharded_optim_state_dict = FSDP.optim_state_dict_to_load(
                     dexwm, optimizer, checkpoint["opt"]
                 )
                 optimizer.load_state_dict(sharded_optim_state_dict)
         else:
             dexwm.module.load_state_dict(pretrained_dict)
-            if ('robo' not in dataset_name) or ('robo' in resume):
-                if ('real' in dataset_name) and ('real' not in resume):
-                    pass
-                else:
-                    optimizer.load_state_dict(checkpoint["opt"])
-        if ('robo' not in dataset_name) or ('robo' in resume):
-            if ('real' in dataset_name) and ('real' not in resume):
-                pass
-            else:
-                lr_scheduler.load_state_dict(checkpoint["scheduler"])
-                last_epoch = checkpoint["epoch"]
-                start_step = checkpoint["train_steps"] + 1
-                scaler.load_state_dict(checkpoint["scaler"])
+            if _same_domain:
+                optimizer.load_state_dict(checkpoint["opt"])
+        if _same_domain:
+            lr_scheduler.load_state_dict(checkpoint["scheduler"])
+            last_epoch = checkpoint["epoch"]
+            start_step = checkpoint["train_steps"] + 1
+            scaler.load_state_dict(checkpoint["scaler"])
 
-                # Reseed sampler
-                train_loader.sampler.seed = seed + start_step
-                print(f"Reseeding with {seed + start_step}")
+            # Reseed sampler
+            train_loader.sampler.seed = seed + start_step
+            print(f"Reseeding with {seed + start_step}")
 
     def train_fn(model, data_loader, optimizer, lr_scheduler, train, epoch_num, start_step):
         if train:

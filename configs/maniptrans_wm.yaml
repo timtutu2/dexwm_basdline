@@ -19,7 +19,7 @@ train:
   global_seed: 0
   batch_size: 1        # RTX 2080 (10.75 GB) — keep at 1
   num_workers: 2
-  epochs: 40
+  epochs: 5000
   optim:
     lr: 1e-3
     lr_decoder: 1e-4
