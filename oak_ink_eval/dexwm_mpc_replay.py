@@ -262,6 +262,34 @@ def score_candidates(model, context_imgs, curr_pose44, cand_poses,
     return loss.cpu().numpy()
 
 
+def cem_plan(model, context_imgs, curr_pose44, goal_emb, num_context, device,
+             num_samples=512, opt_steps=5, topk=10, sigma=0.02):
+    """CEM over continuous pose44 delta space. Returns (best_pose44, best_loss)."""
+    mu  = np.zeros((44, 3), dtype=np.float32)
+    std = np.full((44, 3), sigma, dtype=np.float32)
+    best_loss = np.inf
+    for _ in range(opt_steps):
+        deltas     = (mu[None] + std[None] * np.random.randn(num_samples, 44, 3)).astype(np.float32)
+        cand_poses = curr_pose44[None] + deltas                   # (N, 44, 3)
+        losses     = score_candidates(model, context_imgs, curr_pose44, cand_poses,
+                                      goal_emb, num_context, device)
+        elite_idx  = np.argsort(losses)[:topk]
+        elite      = deltas[elite_idx]
+        mu         = elite.mean(0)
+        std        = elite.std(0) + 1e-6
+        best_loss  = float(losses[elite_idx[0]])
+    return (curr_pose44 + mu).astype(np.float32), best_loss
+
+
+def find_nearest_gt_frame(target_pose44, all_poses, lo, hi):
+    """GT frame index in [lo, hi) whose pose44 has minimum MSE to target."""
+    lo = max(lo, 0); hi = min(hi, len(all_poses))
+    if lo >= hi:
+        return lo
+    dists = np.mean((all_poses[lo:hi] - target_pose44[None]) ** 2, axis=(1, 2))
+    return lo + int(np.argmin(dists))
+
+
 # ─────────────────────────────── IsaacGym setup ───────────────────────────────
 
 def init_gym(gpu_id: int):
@@ -270,7 +298,8 @@ def init_gym(gpu_id: int):
     sp.up_axis = gymapi.UP_AXIS_Z
     sp.gravity = gymapi.Vec3(0.0, 0.0, -9.8)
     sp.dt, sp.substeps = 1.0 / 60.0, 2
-    sp.use_gpu_pipeline = sp.physx.use_gpu = True
+    sp.use_gpu_pipeline = False
+    sp.physx.use_gpu   = False
     sp.physx.num_threads = 4
     sp.physx.solver_type = 1
     sp.physx.num_position_iterations = 8
@@ -305,12 +334,18 @@ def load_obj_asset(gym, sim, obj_id: str, data_root: str):
     fname   = [f for f in os.listdir(obj_dir) if f.endswith(".urdf")][0]
     opts = gymapi.AssetOptions()
     opts.override_com = opts.override_inertia = True
-    opts.convex_decomposition_from_submeshes = True
+    opts.convex_decomposition_from_submeshes = False
     opts.mesh_normal_mode = gymapi.COMPUTE_PER_VERTEX
+    opts.use_mesh_materials = True
     opts.vhacd_enabled = True
-    opts.vhacd_params = gymapi.VhacdParams(); opts.vhacd_params.resolution = 200000
+    opts.vhacd_params = gymapi.VhacdParams()
+    opts.vhacd_params.resolution = 1000
     opts.density = 200.0
-    asset = gym.load_asset(sim, obj_dir, fname, opts)
+    # URDFs reference meshes as "data/OakInk-v2/..." relative to the ManipTrans
+    # project root (parent of data/). Pass that root so IsaacGym resolves correctly.
+    maniptrans_root = os.path.dirname(data_root)
+    rel_urdf = os.path.join("data", "OakInk-v2", "coacd_object_preview", "align_ds", obj_id, fname)
+    asset = gym.load_asset(sim, maniptrans_root, rel_urdf, opts)
     assert asset is not None
     return asset
 
@@ -340,7 +375,13 @@ def parse_args():
                    help="Path to goal PNG (last frame of the pre-rendered RGB dir)")
     p.add_argument("--output_dir",       default="output/dexwm_mpc")
     p.add_argument("--headless",         action="store_true")
-    p.add_argument("--search_window",    type=int, default=10)
+    p.add_argument("--search_window",    type=int, default=50,
+                   help="GT frame look-ahead range for nearest-frame snapping after CEM")
+    p.add_argument("--cem_samples",     type=int,   default=512)
+    p.add_argument("--cem_steps",       type=int,   default=5)
+    p.add_argument("--cem_topk",        type=int,   default=10)
+    p.add_argument("--cem_sigma",       type=float, default=0.02,
+                   help="Initial std for CEM sampling in pose44 space (metres/rad)")
     p.add_argument("--fps",              type=float, default=30.0)
     p.add_argument("--gpu_id",           type=int, default=0,
                    help="CUDA/IsaacGym GPU id to use")
@@ -461,8 +502,9 @@ def main():
     lh_idx     = gym.get_actor_index(env, lh_actor,     gymapi.DOMAIN_SIM)
     obj_rh_idx = gym.get_actor_index(env, obj_rh_actor, gymapi.DOMAIN_SIM)
     obj_lh_idx = gym.get_actor_index(env, obj_lh_actor, gymapi.DOMAIN_SIM)
+    gym_device = "cpu"   # gymtorch tensors live on CPU when use_gpu_pipeline=False
     all_idxs   = torch.tensor([rh_idx, lh_idx, obj_rh_idx, obj_lh_idx],
-                               dtype=torch.int32, device=device)
+                               dtype=torch.int32, device=gym_device)
 
     viewer = None
     if not args.headless:
@@ -477,18 +519,18 @@ def main():
             (rh_idx, rh_data["opt_wrist_pos"][fi], rh_data["opt_wrist_rot"][fi]),
             (lh_idx, lh_data["opt_wrist_pos"][fi], lh_data["opt_wrist_rot"][fi]),
         ]:
-            root_state[idx, :3]  = torch.tensor(pos.astype(np.float32), device=device)
-            root_state[idx, 3:7] = torch.tensor(aa_to_isaac_quat(rot), device=device)
+            root_state[idx, :3]  = torch.tensor(pos.astype(np.float32), device=gym_device)
+            root_state[idx, 3:7] = torch.tensor(aa_to_isaac_quat(rot), device=gym_device)
             root_state[idx, 7:]  = 0.0
         for actor_idx, traj in [(obj_rh_idx, obj_rh_traj), (obj_lh_idx, obj_lh_traj)]:
             T = traj[fi]
-            root_state[actor_idx, :3]  = torch.tensor(T[:3, 3], device=device)
-            root_state[actor_idx, 3:7] = torch.tensor(rotmat_to_isaac_quat(T[:3, :3]), device=device)
+            root_state[actor_idx, :3]  = torch.tensor(T[:3, 3], device=gym_device)
+            root_state[actor_idx, 3:7] = torch.tensor(rotmat_to_isaac_quat(T[:3, :3]), device=gym_device)
             root_state[actor_idx, 7:]  = 0.0
         rd = rh_data["opt_dof_pos"][fi].astype(np.float32)
         ld = lh_data["opt_dof_pos"][fi].astype(np.float32)
-        dof_state[:n_rh, 0] = torch.tensor(rd, device=device); dof_state[:n_rh, 1] = 0.0
-        dof_state[n_rh:n_rh+n_lh, 0] = torch.tensor(ld, device=device); dof_state[n_rh:n_rh+n_lh, 1] = 0.0
+        dof_state[:n_rh, 0] = torch.tensor(rd, device=gym_device); dof_state[:n_rh, 1] = 0.0
+        dof_state[n_rh:n_rh+n_lh, 0] = torch.tensor(ld, device=gym_device); dof_state[n_rh:n_rh+n_lh, 1] = 0.0
         gym.set_actor_root_state_tensor_indexed(
             sim, gymtorch.unwrap_tensor(root_state),
             gymtorch.unwrap_tensor(all_idxs), len(all_idxs)
@@ -514,6 +556,8 @@ def main():
     # ── MPC loop ──────────────────────────────────────────────────────────────
     print("Running DexWM MPC …")
     cur_frame = 0
+    step_times: list[float] = []
+    t_loop_start = time.perf_counter()
 
     for step_idx in range(num_frames):
         if viewer is not None and gym.query_viewer_has_closed(viewer):
@@ -524,21 +568,21 @@ def main():
         curr_t   = to_tensor(curr_bgr)
         context_imgs = torch.cat([context_imgs[1:], curr_t.unsqueeze(0)], dim=0)
 
-        cand_start = cur_frame + 1
-        cand_end   = min(cur_frame + args.search_window + 1, num_frames)
-        if cand_start >= cand_end:
-            cand_start = cur_frame
-        candidate_idxs = list(range(cand_start, cand_end)) or [cur_frame]
-
-        losses = score_candidates(
-            model, context_imgs,
-            all_poses[cur_frame], all_poses[candidate_idxs],
-            goal_emb, num_context, device
+        best_pose44, cem_loss = cem_plan(
+            model, context_imgs, all_poses[cur_frame], goal_emb, num_context, device,
+            num_samples=args.cem_samples, opt_steps=args.cem_steps,
+            topk=args.cem_topk, sigma=args.cem_sigma,
         )
-        best_frame = candidate_idxs[int(np.argmin(losses))]
+        lo = cur_frame + 1
+        hi = min(cur_frame + args.search_window + 1, num_frames)
+        if lo >= hi:
+            lo = cur_frame
+        best_frame = find_nearest_gt_frame(best_pose44, all_poses, lo, hi)
 
+        step_ms = (time.perf_counter() - t0) * 1000
+        step_times.append(step_ms)
         print(f"[{step_idx:4d}/{num_frames}]  cur={cur_frame}  "
-              f"best={best_frame}  loss={losses.min():.5f}")
+              f"best={best_frame}  cem_loss={cem_loss:.5f}  step={step_ms:.1f}ms")
 
         apply_frame(best_frame)
         cur_frame = best_frame
@@ -558,6 +602,14 @@ def main():
         if cur_frame >= num_frames - 1:
             print("Reached last frame.")
             break
+
+    total_s = time.perf_counter() - t_loop_start
+    if step_times:
+        print(f"\n── Timing ──────────────────────────────────────────")
+        print(f"  Steps run   : {len(step_times)}")
+        print(f"  Total time  : {total_s:.2f}s")
+        print(f"  Per-step    : mean={sum(step_times)/len(step_times):.1f}ms  "
+              f"min={min(step_times):.1f}ms  max={max(step_times):.1f}ms")
 
     if viewer is not None:
         print("Done. Close the viewer to exit.")
