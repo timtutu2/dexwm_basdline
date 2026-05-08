@@ -10,8 +10,8 @@ model:
   do_compile: False
 
 data:
-  rh_pkl_path: /mnt/data/tim_data/dexwm/data/oakink2_processed/retargeted_artimano/mano2artimano_rh/scene_01__A001++seq__083f7a577484ba7929a9__2023-04-27-19-25-24@0.pkl
-  lh_pkl_path: /mnt/data/tim_data/dexwm/data/oakink2_processed/retargeted_artimano/mano2artimano_lh/scene_01__A001++seq__083f7a577484ba7929a9__2023-04-27-19-25-24@0.pkl
+  rh_pkl_path: /mnt/data/tim_data/dexwm/data/oakink2_processed/retargeted_artimano/mano2artimano_rh/scene_01__A001%2B%2Bseq__083f7a577484ba7929a9__2023-04-27-19-25-24@0.pkl
+  lh_pkl_path: /mnt/data/tim_data/dexwm/data/oakink2_processed/retargeted_artimano/mano2artimano_lh/scene_01__A001%2B%2Bseq__083f7a577484ba7929a9__2023-04-27-19-25-24@0.pkl
   rgb_dir: /mnt/data/tim_data/dexwm/data/oakink2_processed/rgb
   max_context_len: 60
   num_context: 8

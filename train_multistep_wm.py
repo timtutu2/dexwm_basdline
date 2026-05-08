@@ -3,6 +3,12 @@
 
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
+# Multi-GPU (e.g. 4 GPUs)
+# torchrun --nproc_per_node=2 \
+#   train_multistep_wm.py \
+#   --config configs/oakink2_multistep_finetune.yaml \
+#   --job_dir runs/oakink2_artimano_multistep_ft_new_map
+
 # --------------------------------------------------------
 
 import numpy as np
