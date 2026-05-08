@@ -375,11 +375,11 @@ def parse_args():
                    help="Path to goal PNG (last frame of the pre-rendered RGB dir)")
     p.add_argument("--output_dir",       default="output/dexwm_mpc")
     p.add_argument("--headless",         action="store_true")
-    p.add_argument("--search_window",    type=int, default=50,
+    p.add_argument("--search_window",    type=int, default=8,
                    help="GT frame look-ahead range for nearest-frame snapping after CEM")
-    p.add_argument("--cem_samples",     type=int,   default=512)
-    p.add_argument("--cem_steps",       type=int,   default=5)
-    p.add_argument("--cem_topk",        type=int,   default=10)
+    p.add_argument("--cem_samples",     type=int,   default=16)
+    p.add_argument("--cem_steps",       type=int,   default=4)
+    p.add_argument("--cem_topk",        type=int,   default=4)
     p.add_argument("--cem_sigma",       type=float, default=0.02,
                    help="Initial std for CEM sampling in pose44 space (metres/rad)")
     p.add_argument("--fps",              type=float, default=30.0)

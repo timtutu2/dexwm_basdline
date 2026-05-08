@@ -10,8 +10,8 @@ model:
   do_compile: False
 
 data:
-  rh_pkl_path: /mnt/data/tim_data/dexwm/data/oakink2_processed/retargeted_inspire/rh/scene_01__A001++seq__083f7a577484ba7929a9__2023-04-27-19-25-24@0.pkl
-  lh_pkl_path: /mnt/data/tim_data/dexwm/data/oakink2_processed/retargeted_inspire/lh/scene_01__A001++seq__083f7a577484ba7929a9__2023-04-27-19-25-24@0.pkl
+  rh_pkl_path: /mnt/data/tim_data/dexwm/data/oakink2_processed/retargeted_artimano/mano2artimano_rh/scene_01__A001++seq__083f7a577484ba7929a9__2023-04-27-19-25-24@0.pkl
+  lh_pkl_path: /mnt/data/tim_data/dexwm/data/oakink2_processed/retargeted_artimano/mano2artimano_lh/scene_01__A001++seq__083f7a577484ba7929a9__2023-04-27-19-25-24@0.pkl
   rgb_dir: /mnt/data/tim_data/dexwm/data/oakink2_processed/rgb
   max_context_len: 60
   num_context: 8
@@ -37,11 +37,11 @@ train:
   eval_freq: 50
   kp_weight: 0            # no keypoint supervision
   resume: /mnt/data/tim_data/dexwm/data/checkpoints/egodex_0.pth_24000.tar
-  save_name: oakink2_maniptrans_multistep_ft
+  save_name: oakink2_artimano_multistep_ft_new_map
 
 wandb:
   do_wandb: True
   project: dexwm
   entity: kttu_tim-uc-san-diego
-  name: oakink2_maniptrans_multistep_ft
+  name: oakink2_maniptrans_multistep_ft_artimano
   api_key: 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

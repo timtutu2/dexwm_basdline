@@ -10,9 +10,13 @@ come from dexhandmanip_bih_gt_v2.py's chest camera:
     hfov       = 60°
     width=294, height=224
 
-Joints are taken from opt_joints_pos (18 bodies per hand, world frame) stored in the
-retargeted pkl files.  They are transformed to camera frame and padded from 18→21
-keypoints per hand so the action vector matches the EgoDex action_dim=132 format:
+Joints are taken from opt_joints_pos (N bodies per hand, world frame) stored in the
+retargeted pkl files.  They are transformed to camera frame and mapped to 21 MANO-
+equivalent keypoints per hand so the action vector matches the EgoDex action_dim=132:
+
+  Inspire (18 bodies): truncated/padded to 21 (unchanged behaviour).
+  Artimano (28 bodies): mapped via _ARTIMANO_TO_MANO — fingertips use exact tip
+    bodies; intermediate joints use the first body of each split group (= joint centre).
 
     action = [lh_joints(21,3), rh_joints(21,3), cam_pos(1,3), cam_rot(1,3)] → (44,3)
     input to model: np.concatenate([curr_poses, next_poses]) → (88, 3)
@@ -46,6 +50,44 @@ _N_BODIES_PER_HAND = 18
 # DexWM EgoDex-format keypoints per hand (21 left + 21 right + cam_pos + cam_rot = 44)
 _N_KP_PER_HAND = 21
 _N_KP_TOTAL    = 44   # must give action_dim = 44*3 = 132 after next-curr diff
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Artimano (28 bodies) → MANO (21 joints) index mapping
+#
+# Artimano body order:
+#   0:palm  1:index1y  2:index1z  3:index2  4:index3  5:index_tip
+#   6:middle1y  7:middle1z  8:middle2  9:middle3  10:middle_tip
+#   11:pinky1y  12:pinky1z  13:pinky2  14:pinky3  15:pinky_tip
+#   16:ring1y  17:ring1z  18:ring2  19:ring3  20:ring_tip
+#   21:thumb1x  22:thumb1y  23:thumb1z  24:thumb2y  25:thumb2z  26:thumb3  27:thumb_tip
+#
+# For split joints (e.g. index1y+index1z for MCP), we use the FIRST body in the
+# chain — it sits at the anatomical joint centre and corresponds to MANO's joint.
+# Fingertip bodies map exactly to MANO tip indices (highest-priority correspondence).
+_ARTIMANO_N_BODIES = 28
+_ARTIMANO_TO_MANO = [
+    0,   # 0  Wrist       ← palm
+    21,  # 1  Thumb CMC   ← thumb1x  (first of 3 CMC pivots)
+    24,  # 2  Thumb MCP   ← thumb2y  (first of 2 MCP pivots)
+    26,  # 3  Thumb IP    ← thumb3
+    27,  # 4  Thumb tip   ← thumb_tip           ← exact fingertip body
+    1,   # 5  Index MCP   ← index1y  (first of 2 MCP pivots)
+    3,   # 6  Index PIP   ← index2
+    4,   # 7  Index DIP   ← index3
+    5,   # 8  Index tip   ← index_tip           ← exact fingertip body
+    6,   # 9  Middle MCP  ← middle1y
+    8,   # 10 Middle PIP  ← middle2
+    9,   # 11 Middle DIP  ← middle3
+    10,  # 12 Middle tip  ← middle_tip          ← exact fingertip body
+    16,  # 13 Ring MCP    ← ring1y
+    18,  # 14 Ring PIP    ← ring2
+    19,  # 15 Ring DIP    ← ring3
+    20,  # 16 Ring tip    ← ring_tip            ← exact fingertip body
+    11,  # 17 Pinky MCP   ← pinky1y
+    13,  # 18 Pinky PIP   ← pinky2
+    14,  # 19 Pinky DIP   ← pinky3
+    15,  # 20 Pinky tip   ← pinky_tip           ← exact fingertip body
+]
 
 
 def _build_cam_extrinsic() -> np.ndarray:
@@ -193,8 +235,16 @@ class OakInk2ManipTransDataset(Dataset):
         return j_cam[:, :3]                                      # (N, 3)
 
     @staticmethod
-    def _resize_joints(joints_cam: np.ndarray, target: int = _N_KP_PER_HAND) -> np.ndarray:
-        """Truncate or pad (N, 3) joints to exactly (target, 3)."""
+    def _to_mano_kp(joints_cam: np.ndarray, target: int = _N_KP_PER_HAND) -> np.ndarray:
+        """Map (N, 3) hand joints to (target, 3) MANO-equivalent keypoints.
+
+        Artimano (28 bodies): applies _ARTIMANO_TO_MANO index mapping so that
+        fingertips land on exact artimano tip bodies and intermediate joints use
+        the first body of each split group (the anatomical joint centre).
+        Other hands: truncate or pad to target.
+        """
+        if len(joints_cam) == _ARTIMANO_N_BODIES:
+            return joints_cam[_ARTIMANO_TO_MANO]   # (21, 3), no copy needed
         n = len(joints_cam)
         if n >= target:
             return joints_cam[:target]
@@ -209,9 +259,9 @@ class OakInk2ManipTransDataset(Dataset):
         rh_cam = self._joints_to_cam(rh_j)
         lh_cam = self._joints_to_cam(lh_j)
 
-        # Truncate or pad each hand to exactly _N_KP_PER_HAND=21 joints
-        rh_padded = self._resize_joints(rh_cam)   # (21, 3)
-        lh_padded = self._resize_joints(lh_cam)   # (21, 3)
+        # Map each hand to exactly _N_KP_PER_HAND=21 MANO-equivalent keypoints
+        rh_padded = self._to_mano_kp(rh_cam)   # (21, 3)
+        lh_padded = self._to_mano_kp(lh_cam)   # (21, 3)
 
         # Constant camera entries (delta will be 0 since camera is static)
         all_poses = np.concatenate([
