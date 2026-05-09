@@ -129,6 +129,37 @@ def build_mujoco2gym() -> np.ndarray:
 
 # ─────────────────────────────── keypoint helpers ─────────────────────────────
 
+# Artimano (28 bodies) → MANO-21 index mapping (matches OakInk2ManipTransDataset)
+#   0:palm  1:index1y  2:index1z  3:index2  4:index3  5:index_tip
+#   6:middle1y  7:middle1z  8:middle2  9:middle3  10:middle_tip
+#   11:pinky1y  12:pinky1z  13:pinky2  14:pinky3  15:pinky_tip
+#   16:ring1y  17:ring1z  18:ring2  19:ring3  20:ring_tip
+#   21:thumb1x  22:thumb1y  23:thumb1z  24:thumb2y  25:thumb2z  26:thumb3  27:thumb_tip
+_ARTIMANO_TO_MANO = [
+    0,   # Wrist       ← palm
+    21,  # Thumb CMC   ← thumb1x
+    24,  # Thumb MCP   ← thumb2y
+    26,  # Thumb IP    ← thumb3
+    27,  # Thumb tip   ← thumb_tip
+    1,   # Index MCP   ← index1y
+    3,   # Index PIP   ← index2
+    4,   # Index DIP   ← index3
+    5,   # Index tip   ← index_tip
+    6,   # Middle MCP  ← middle1y
+    8,   # Middle PIP  ← middle2
+    9,   # Middle DIP  ← middle3
+    10,  # Middle tip  ← middle_tip
+    16,  # Ring MCP    ← ring1y
+    18,  # Ring PIP    ← ring2
+    19,  # Ring DIP    ← ring3
+    20,  # Ring tip    ← ring_tip
+    11,  # Pinky MCP   ← pinky1y
+    13,  # Pinky PIP   ← pinky2
+    14,  # Pinky DIP   ← pinky3
+    15,  # Pinky tip   ← pinky_tip
+]
+
+
 def joints_to_cam(joints_world: np.ndarray) -> np.ndarray:
     ones  = np.ones((len(joints_world), 1), dtype=np.float32)
     j_hom = np.concatenate([joints_world.astype(np.float32), ones], axis=1)
@@ -139,10 +170,17 @@ def get_pose44(rh_joints: np.ndarray, lh_joints: np.ndarray) -> np.ndarray:
     """(44,3) camera-frame pose matching OakInk2ManipTransDataset._get_pose."""
     rh_cam = joints_to_cam(rh_joints)
     lh_cam = joints_to_cam(lh_joints)
-    rh_pad = np.concatenate([rh_cam, rh_cam[-3:]], axis=0)   # 18→21
-    lh_pad = np.concatenate([lh_cam, lh_cam[-3:]], axis=0)
+    n = len(rh_cam)
+    if n == 28:   # artimano: select 21 MANO-equivalent joints
+        rh_21 = rh_cam[_ARTIMANO_TO_MANO]
+        lh_21 = lh_cam[_ARTIMANO_TO_MANO]
+    else:         # inspire (18 joints): tile last joint to reach 21
+        pad = np.tile(rh_cam[-1:], (21 - n, 1))
+        rh_21 = np.concatenate([rh_cam, pad], axis=0)
+        pad = np.tile(lh_cam[-1:], (21 - n, 1))
+        lh_21 = np.concatenate([lh_cam, pad], axis=0)
     return np.concatenate(
-        [lh_pad, rh_pad, _CAM_POS_F32[None], _CAM_ROT_EULER[None]], axis=0
+        [lh_21, rh_21, _CAM_POS_F32[None], _CAM_ROT_EULER[None]], axis=0
     )  # (44, 3)
 
 
@@ -160,7 +198,7 @@ def load_retargeted_pkl(data_idx: str, side: str, data_root: str) -> dict:
     stage    = data_idx.split("@")[1]
     anno_dir = os.path.join(data_root, "OakInk-v2", "anno_preview")
     enc_stem, dec_stem = _resolve_anno_stem(seq_hash, anno_dir)
-    pkl_dir = os.path.join(data_root, "retargeting", "OakInk-v2", f"mano2inspire_{side}")
+    pkl_dir = os.path.join(data_root, "retargeting", "OakInk-v2", f"mano2artimano_{side}")
     for stem in (dec_stem, enc_stem):
         p = os.path.join(pkl_dir, f"{stem}@{stage}.pkl")
         if os.path.exists(p):
@@ -249,8 +287,9 @@ def score_candidates(model, context_imgs, curr_pose44, cand_poses,
                      goal_emb, num_context, device):
     """Returns (K,) MSE loss — lower = closer to goal."""
     K      = len(cand_poses)
-    deltas = (cand_poses - curr_pose44[None]).astype(np.float32)   # (K,44,3)
-    actions = torch.zeros(K, num_context, 44, 3, dtype=torch.float32, device=device)
+    deltas = (cand_poses - curr_pose44[None]).astype(np.float32)
+    pose_n, pose_d = curr_pose44.shape
+    actions = torch.zeros(K, num_context, pose_n, pose_d, dtype=torch.float32, device=device)
     actions[:, -1] = torch.from_numpy(deltas).to(device)
     ctx   = context_imgs.unsqueeze(0).expand(K, -1, -1, -1, -1).contiguous().to(device)
     rel_t = torch.zeros(K, num_context, dtype=torch.float32, device=device)
@@ -264,12 +303,13 @@ def score_candidates(model, context_imgs, curr_pose44, cand_poses,
 
 def cem_plan(model, context_imgs, curr_pose44, goal_emb, num_context, device,
              num_samples=512, opt_steps=5, topk=10, sigma=0.02):
-    """CEM over continuous pose44 delta space. Returns (best_pose44, best_loss)."""
-    mu  = np.zeros((44, 3), dtype=np.float32)
-    std = np.full((44, 3), sigma, dtype=np.float32)
+    """CEM over continuous pose delta space. Returns (best_pose, best_loss)."""
+    pose_shape = curr_pose44.shape
+    mu  = np.zeros(pose_shape, dtype=np.float32)
+    std = np.full(pose_shape, sigma, dtype=np.float32)
     best_loss = np.inf
     for _ in range(opt_steps):
-        deltas     = (mu[None] + std[None] * np.random.randn(num_samples, 44, 3)).astype(np.float32)
+        deltas     = (mu[None] + std[None] * np.random.randn(num_samples, *pose_shape)).astype(np.float32)
         cand_poses = curr_pose44[None] + deltas                   # (N, 44, 3)
         losses     = score_candidates(model, context_imgs, curr_pose44, cand_poses,
                                       goal_emb, num_context, device)
@@ -288,6 +328,87 @@ def find_nearest_gt_frame(target_pose44, all_poses, lo, hi):
         return lo
     dists = np.mean((all_poses[lo:hi] - target_pose44[None]) ** 2, axis=(1, 2))
     return lo + int(np.argmin(dists))
+
+
+@torch.inference_mode()
+def score_multistep(model, context_imgs, cand_deltas_seq,
+                    goal_emb, num_context, device, exp_decay=0.6, chunk_size=8):
+    """Score N candidate H-step trajectories via autoregressive rollout.
+
+    cand_deltas_seq: (N, H, 44, 3) per-step pose44 deltas
+    Returns (N,) losses (lower = closer to goal at each future step).
+    chunk_size: process this many candidates at a time to limit peak VRAM.
+    """
+    N, H = cand_deltas_seq.shape[:2]
+    exp_w = np.array([exp_decay ** (H - 1 - h) for h in range(H)], dtype=np.float32)
+    exp_w /= exp_w.sum()
+
+    all_losses = []
+    ctx_cpu = context_imgs.unsqueeze(0)   # (1, T, C, H, W) — keep on CPU until chunked
+
+    for start in range(0, N, chunk_size):
+        end      = min(start + chunk_size, N)
+        K        = end - start
+        deltas_k = cand_deltas_seq[start:end]   # (K, H, pose_n, pose_d)
+        pose_n, pose_d = deltas_k.shape[2], deltas_k.shape[3]
+
+        ctx      = ctx_cpu.expand(K, -1, -1, -1, -1).contiguous().to(device)
+        goal_exp = goal_emb.expand(K, -1, -1)
+
+        prev_emb   = None
+        total_loss = torch.zeros(K, device=device)
+
+        for h in range(H):
+            delta_h = torch.from_numpy(deltas_k[:, h].astype(np.float32)).to(device)
+            actions = torch.zeros(K, num_context, pose_n, pose_d, dtype=torch.float32, device=device)
+            actions[:, -1] = delta_h
+            rel_t = torch.zeros(K, num_context, dtype=torch.float32, device=device)
+
+            x_pred, _, _, _, _ = model(ctx, actions, rel_t, prev_emb=prev_emb, action_diff=True)
+            pred_last = x_pred[:, -1]   # (K, P, F)
+
+            total_loss = total_loss + exp_w[h] * torch.nn.functional.mse_loss(
+                pred_last, goal_exp, reduction='none'
+            ).mean(dim=[1, 2])
+
+            prev_emb = pred_last.unsqueeze(1) if prev_emb is None else \
+                       torch.cat([prev_emb, pred_last.unsqueeze(1)], dim=1)
+
+        all_losses.append(total_loss.cpu())
+        del ctx, prev_emb, total_loss
+        torch.cuda.empty_cache()
+
+    return torch.cat(all_losses).numpy()
+
+
+def cem_plan_multistep(model, context_imgs, curr_pose44, goal_emb, num_context, device,
+                        horizon, num_samples=512, opt_steps=5, topk=10, sigma=0.02,
+                        mu_warm=None, std_warm=None, chunk_size=8):
+    """CEM over a horizon-step pose44 delta sequence (shrinking-horizon MPC).
+
+    Returns (planned_poses, mu, std, best_loss) where planned_poses: (horizon, 44, 3).
+    mu/std can be passed back as mu_warm/std_warm for warm-starting the next call.
+    """
+    pose_shape = curr_pose44.shape
+    mu  = mu_warm  if mu_warm  is not None else np.zeros((horizon,) + pose_shape, dtype=np.float32)
+    std = std_warm if std_warm is not None else np.full((horizon,) + pose_shape, sigma, dtype=np.float32)
+
+    best_loss = np.inf
+    for _ in range(opt_steps):
+        noise  = np.random.randn(num_samples, horizon, *pose_shape).astype(np.float32)
+        deltas = (mu[None] + std[None] * noise)
+
+        losses    = score_multistep(model, context_imgs, deltas, goal_emb, num_context, device,
+                                    chunk_size=chunk_size)
+        elite_idx = np.argsort(losses)[:topk]
+        elite     = deltas[elite_idx]
+        mu        = elite.mean(axis=0)
+        std       = elite.std(axis=0) + 1e-6
+        best_loss = float(losses[elite_idx[0]])
+
+    # mu is the refined elite mean — use it as the final plan (absolute poses)
+    planned_poses = curr_pose44[None] + np.cumsum(mu, axis=0)   # (H, 44, 3)
+    return planned_poses, mu, std, best_loss
 
 
 # ─────────────────────────────── IsaacGym setup ───────────────────────────────
@@ -314,8 +435,8 @@ def init_gym(gpu_id: int):
 
 
 def load_hand_asset(gym, sim, side: str, asset_root: str):
-    hand_dir = os.path.join(asset_root, "inspire_hand")
-    fname    = f"inspire_hand_{'right' if side == 'rh' else 'left'}.urdf"
+    hand_dir = os.path.join(asset_root, "mano_urdf")
+    fname    = f"{'rh' if side == 'rh' else 'lh'}_mano.urdf"
     opts = gymapi.AssetOptions()
     opts.fix_base_link = False
     opts.disable_gravity = True
@@ -380,8 +501,12 @@ def parse_args():
     p.add_argument("--cem_samples",     type=int,   default=16)
     p.add_argument("--cem_steps",       type=int,   default=4)
     p.add_argument("--cem_topk",        type=int,   default=4)
+    p.add_argument("--cem_chunk",       type=int,   default=8,
+                   help="Candidates scored per GPU batch — lower=less VRAM (e.g. 4 for 8GB GPU)")
     p.add_argument("--cem_sigma",       type=float, default=0.02,
                    help="Initial std for CEM sampling in pose44 space (metres/rad)")
+    p.add_argument("--pred_steps",        type=int,   default=3,
+                   help="Shrinking-horizon block length: plan H steps, execute 1, plan H-1, …")
     p.add_argument("--fps",              type=float, default=30.0)
     p.add_argument("--gpu_id",           type=int, default=0,
                    help="CUDA/IsaacGym GPU id to use")
@@ -418,7 +543,7 @@ def main():
     print(f"Goal emb: {goal_emb.shape}")
 
     # ── Load retargeted pkls ───────────────────────────────────────────────────
-    print("Loading inspire retargeted pkls …")
+    print("Loading artimano retargeted pkls …")
     rh_data    = load_retargeted_pkl(args.data_idx, "rh", DATA_ROOT)
     lh_data    = load_retargeted_pkl(args.data_idx, "lh", DATA_ROOT)
     num_frames = rh_data["opt_dof_pos"].shape[0]
@@ -429,6 +554,7 @@ def main():
         get_pose44(rh_data["opt_joints_pos"][i], lh_data["opt_joints_pos"][i])
         for i in range(num_frames)
     ])   # (T, 44, 3)
+    goal_pose44 = all_poses[-1]   # last frame = goal pose for kp loss
 
     # ── Annotation + object trajectories ─────────────────────────────────────
     anno, dec_stem = load_annotation(args.data_idx, DATA_ROOT)
@@ -553,11 +679,15 @@ def main():
     os.makedirs(rgb_out, exist_ok=True)
     frame_dt = 1.0 / args.fps
 
-    # ── MPC loop ──────────────────────────────────────────────────────────────
-    print("Running DexWM MPC …")
+    # ── MPC loop (shrinking-horizon) ──────────────────────────────────────────
+    print(f"Running DexWM shrinking-horizon MPC (pred_steps={args.pred_steps}) …")
     cur_frame = 0
     step_times: list[float] = []
     t_loop_start = time.perf_counter()
+
+    horizon  = args.pred_steps
+    mu_warm  = None
+    std_warm = None
 
     for step_idx in range(num_frames):
         if viewer is not None and gym.query_viewer_has_closed(viewer):
@@ -568,24 +698,43 @@ def main():
         curr_t   = to_tensor(curr_bgr)
         context_imgs = torch.cat([context_imgs[1:], curr_t.unsqueeze(0)], dim=0)
 
-        best_pose44, cem_loss = cem_plan(
+        planned_poses, mu_warm, std_warm, cem_loss = cem_plan_multistep(
             model, context_imgs, all_poses[cur_frame], goal_emb, num_context, device,
+            horizon=horizon,
             num_samples=args.cem_samples, opt_steps=args.cem_steps,
             topk=args.cem_topk, sigma=args.cem_sigma,
+            mu_warm=mu_warm, std_warm=std_warm,
+            chunk_size=args.cem_chunk,
         )
+
+        # Execute only the first step of the planned sequence
         lo = cur_frame + 1
         hi = min(cur_frame + args.search_window + 1, num_frames)
         if lo >= hi:
             lo = cur_frame
-        best_frame = find_nearest_gt_frame(best_pose44, all_poses, lo, hi)
+        best_frame = find_nearest_gt_frame(planned_poses[0], all_poses, lo, hi)
 
+        kp_loss = float(np.mean((all_poses[best_frame] - goal_pose44) ** 2))
         step_ms = (time.perf_counter() - t0) * 1000
         step_times.append(step_ms)
-        print(f"[{step_idx:4d}/{num_frames}]  cur={cur_frame}  "
-              f"best={best_frame}  cem_loss={cem_loss:.5f}  step={step_ms:.1f}ms")
+        print(f"[{step_idx:4d}/{num_frames}]  cur={cur_frame}  horizon={horizon}  "
+              f"best={best_frame}  cem_loss={cem_loss:.5f}  kp_loss={kp_loss:.5f}  step={step_ms:.1f}ms")
 
         apply_frame(best_frame)
         cur_frame = best_frame
+
+        # Shrink horizon and warm-start from tail of current plan
+        horizon -= 1
+        if horizon == 0:
+            horizon  = args.pred_steps
+            mu_warm  = None
+            std_warm = None
+        else:
+            # Re-root deltas to new curr_pose so warm-start stays in the right frame
+            future_abs = np.concatenate(
+                [all_poses[cur_frame][None], planned_poses[1:]], axis=0)  # (horizon+1, 44, 3)
+            mu_warm  = (future_abs[1:] - future_abs[:-1])   # (horizon, 44, 3)
+            std_warm = std_warm[1:]                          # tail of refined std
 
         gym.simulate(sim); gym.fetch_results(sim, True); gym.step_graphics(sim)
 
